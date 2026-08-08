@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cell Explorer — a study bench for cells and viruses</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --field:#0B1220;        /* microscope field */
+    --panel:#121A2B;
+    --panel-2:#0E1524;
+    --line:#22304A;
+    --ink:#E8EEF7;
+    --muted:#8FA3BF;
+    --amber:#FFB454;        /* selection / UI accent */
+    --cyan:#38E1D4;
+    --magenta:#FF5FA2;
+    --green:#7BE07B;
+    --violet:#A78BFA;
+    --blue:#5EA8FF;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--field);
+    color:var(--ink);
+    font-family:'Atkinson Hyperlegible',system-ui,sans-serif;
+    font-size:16px;line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1240px;margin:0 auto;padding:20px 20px 40px}
+
+  /* ---------- header ---------- */
+  header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding:6px 4px 18px}
+  .brand h1{
+    font-family:'Bricolage Grotesque',sans-serif;font-weight:800;
+    font-size:clamp(26px,4vw,38px);letter-spacing:-0.5px;line-height:1.05;
+  }
+  .brand h1 .dot{color:var(--cyan)}
+  .brand p{color:var(--muted);font-size:14px;margin-top:4px}
+  nav.tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .tab{
+    font-family:'Space Mono',monospace;font-size:12.5px;letter-spacing:.4px;
+    color:var(--muted);background:var(--panel-2);border:1px solid var(--line);
+    border-radius:9px;padding:9px 14px;cursor:pointer;transition:all .15s ease;
+  }
+  .tab:hover{color:var(--ink);border-color:#33456b}
+  .tab[aria-selected="true"]{color:#081018;background:var(--amber);border-color:var(--amber);font-weight:700}
+  .tab:focus-visible,button:focus-visible,.part:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+  /* ---------- layout ---------- */
+  .stage{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:18px;align-items:start}
+  @media (max-width:900px){.stage{grid-template-columns:1fr}}
+
+  /* ---------- viewport ---------- */
+  .scope{
+    position:relative;background:radial-gradient(120% 120% at 50% 38%, #101B33 0%, #0A1120 55%, #070C17 100%);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    height:min(66vh,640px);min-height:420px;
+  }
+  #view{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  #view.dragging{cursor:grabbing}
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(95% 95% at 50% 50%, transparent 62%, rgba(4,8,16,.55) 100%)}
+
+  /* specimen plate: styled like a slide label */
+  .plate{
+    position:absolute;top:14px;left:14px;z-index:5;pointer-events:none;
+    background:rgba(10,16,30,.82);border:1px solid var(--line);border-left:3px solid var(--cyan);
+    border-radius:8px;padding:10px 14px;backdrop-filter:blur(4px);max-width:75%;
+  }
+  .plate .eyebrow{font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:1.6px;color:var(--muted);text-transform:uppercase}
+  .plate .name{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:20px;letter-spacing:-.2px}
+  .plate .size{font-family:'Space Mono',monospace;font-size:12px;color:var(--cyan);margin-top:2px}
+
+  /* scale bar, like every real micrograph */
+  .scalebar{
+    position:absolute;right:16px;bottom:14px;z-index:5;pointer-events:none;text-align:right;
+    font-family:'Space Mono',monospace;font-size:11.5px;color:var(--ink);
+  }
+  .scalebar .bar{height:3px;background:var(--ink);border-radius:2px;margin-top:4px;margin-left:auto;box-shadow:0 0 6px rgba(232,238,247,.35)}
+
+  .hint{
+    position:absolute;left:14px;bottom:12px;z-index:5;pointer-events:none;
+    font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);
+  }
+
+  .scope-controls{position:absolute;top:14px;right:14px;z-index:6;display:flex;gap:8px}
+  .chipbtn{
+    font-family:'Space Mono',monospace;font-size:11.5px;color:var(--ink);
+    background:rgba(10,16,30,.82);border:1px solid var(--line);border-radius:8px;
+    padding:7px 11px;cursor:pointer;backdrop-filter:blur(4px);transition:all .15s ease;
+  }
+  .chipbtn:hover{border-color:var(--amber);color:var(--amber)}
+  .chipbtn[aria-pressed="true"]{background:var(--amber);color:#081018;border-color:var(--amber);font-weight:700}
+
+  /* floating 3D labels */
+  .lbl{
+    position:absolute;z-index:4;pointer-events:none;transform:translate(-50%,-130%);
+    font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.3px;white-space:nowrap;
+    color:var(--ink);background:rgba(8,13,25,.85);border:1px solid var(--line);
+    border-radius:6px;padding:3px 7px;
+  }
+  .lbl::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:9px;background:var(--muted)}
+  .lbl.bonus{color:var(--muted);font-style:italic}
+
+  .tip{
+    position:absolute;z-index:7;pointer-events:none;display:none;transform:translate(12px,14px);
+    font-family:'Space Mono',monospace;font-size:11.5px;color:#081018;background:var(--amber);
+    border-radius:6px;padding:4px 8px;font-weight:700;
+  }
+
+  /* quiz banner */
+  .quizbar{
+    position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:6;display:none;
+    background:rgba(10,16,30,.92);border:1px solid var(--amber);border-radius:10px;
+    padding:10px 16px;text-align:center;backdrop-filter:blur(4px);max-width:80%;
+  }
+  .quizbar .q{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:17px}
+  .quizbar .s{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin-top:2px}
+  .quizbar .fb{font-family:'Space Mono',monospace;font-size:12px;margin-top:4px;min-height:16px}
+  .fb.good{color:var(--green)} .fb.bad{color:var(--magenta)}
+
+  /* ---------- sidebar ---------- */
+  .side{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .card h2{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:19px;margin-bottom:8px;letter-spacing:-.2px}
+  .card p.intro{color:var(--muted);font-size:15px}
+
+  .parts-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+  .parts-head h3{font-family:'Space Mono',monospace;font-size:11.5px;letter-spacing:1.4px;color:var(--muted);text-transform:uppercase}
+  .parts-head span{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
+  .parts{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto;padding-right:4px}
+  .parts.locked{opacity:.35;pointer-events:none}
+  .part{
+    display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;border:1px solid transparent;
+    cursor:pointer;background:transparent;color:var(--ink);text-align:left;width:100%;
+    font-family:'Atkinson Hyperlegible',sans-serif;font-size:14.5px;transition:background .12s ease;
+  }
+  .part:hover{background:var(--panel-2)}
+  .part.sel{background:var(--panel-2);border-color:var(--amber)}
+  .swatch{width:11px;height:11px;border-radius:50%;flex:none;box-shadow:0 0 8px currentColor}
+  .part .tag{margin-left:auto;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:2px 6px;text-transform:uppercase;flex:none}
+
+  .info{border-left:3px solid var(--amber)}
+  .info .placeholder{color:var(--muted);font-style:italic;font-size:14.5px}
+  .info h2 .chip{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;box-shadow:0 0 10px currentColor}
+  .info p{font-size:15px}
+
+  /* ---------- comparison ---------- */
+  .compare{display:none}
+  .compare.active{display:block}
+  .cmp-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:18px;align-items:start}
+  @media (max-width:900px){.cmp-grid{grid-template-columns:1fr}}
+  .cmp-scope{position:relative;height:min(66vh,640px);min-height:420px;background:radial-gradient(120% 120% at 50% 38%, #101B33 0%, #0A1120 55%, #070C17 100%);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .cmp-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .blob{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:width .5s ease,height .5s ease,opacity .5s ease}
+  .blob .bl{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);font-family:'Space Mono',monospace;font-size:11.5px;white-space:nowrap;color:var(--ink)}
+  .zoombar{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;display:flex;gap:8px}
+  .cmp-note{position:absolute;left:14px;bottom:12px;right:150px;z-index:5;font-size:13.5px;color:var(--muted);font-family:'Atkinson Hyperlegible',sans-serif}
+
+  footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  footer .mono{font-family:'Space Mono',monospace;font-size:11.5px}
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>Cell Explorer<span class="dot">.</span></h1>
+      <p>A study bench for cells and viruses. Rotate, click, learn it cold, then build your own model.</p>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Specimens">
+      <button class="tab" role="tab" data-tab="animal" aria-selected="true">01 · ANIMAL CELL</button>
+      <button class="tab" role="tab" data-tab="bacterium" aria-selected="false">02 · BACTERIUM</button>
+      <button class="tab" role="tab" data-tab="virus" aria-selected="false">03 · VIRUS</button>
+      <button class="tab" role="tab" data-tab="compare" aria-selected="false">SIZE CHECK</button>
+    </nav>
+  </header>
+
+  <!-- 3D stage -->
+  <main class="stage" id="stage3d">
+    <div class="scope" id="scope">
+      <canvas id="view"></canvas>
+      <div class="vignette"></div>
+      <div class="plate">
+        <div class="eyebrow">Specimen <span id="plate-num">01</span></div>
+        <div class="name" id="plate-name">Animal Cell</div>
+        <div class="size" id="plate-size">Eukaryote · ~20 µm across</div>
+      </div>
+      <div class="scope-controls">
+        <button class="chipbtn" id="btn-labels" aria-pressed="false">Labels</button>
+        <button class="chipbtn" id="btn-quiz" aria-pressed="false">Quiz me</button>
+      </div>
+      <div class="quizbar" id="quizbar">
+        <div class="q" id="quiz-q">Find the nucleus</div>
+        <div class="s" id="quiz-s">Question 1 · Score 0</div>
+        <div class="fb" id="quiz-fb"></div>
+      </div>
+      <div class="scalebar"><span id="scale-label">5 µm</span><div class="bar" id="scale-bar" style="width:90px"></div></div>
+      <div class="hint">drag to rotate · scroll or pinch to zoom · click a part (click again to reach parts underneath)</div>
+      <div class="tip" id="tip"></div>
+      <div id="labels"></div>
+    </div>
+
+    <aside class="side">
+      <div class="card">
+        <h2 id="intro-title">What is this?</h2>
+        <p class="intro" id="intro-text"></p>
+      </div>
+      <div class="card">
+        <div class="parts-head"><h3>Parts list</h3><span id="parts-count"></span></div>
+        <div class="parts" id="parts"></div>
+      </div>
+      <div class="card info" id="infocard">
+        <p class="placeholder" id="info-placeholder">Click any part of the specimen, or pick one from the list, to see what it does.</p>
+        <div id="info-body" style="display:none">
+          <h2><span class="chip" id="info-chip"></span><span id="info-name"></span></h2>
+          <p id="info-desc"></p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- comparison stage -->
+  <section class="compare" id="stage-compare">
+    <div class="cmp-grid">
+      <div class="cmp-scope">
+        <div class="zoombar">
+          <button class="chipbtn zoomstop" data-stop="0" aria-pressed="true">Field: 25 µm</button>
+          <button class="chipbtn zoomstop" data-stop="1" aria-pressed="false">Field: 2.5 µm</button>
+          <button class="chipbtn zoomstop" data-stop="2" aria-pressed="false">Field: 250 nm</button>
+        </div>
+        <div class="cmp-stage" id="cmp-stage"></div>
+        <div class="scalebar"><span id="cmp-scale-label"></span><div class="bar" id="cmp-scale-bar"></div></div>
+        <div class="cmp-note" id="cmp-note"></div>
+        <div class="vignette"></div>
+      </div>
+      <aside class="side">
+        <div class="card">
+          <h2>How big are these things, really?</h2>
+          <p class="intro">All three specimens drawn to true relative scale: an animal cell at 20 µm, a bacterium at 2 µm, a virus at 100 nm. Step through the three fields of view and watch what disappears. This is the single most-missed idea on cell projects: a bacterium is about a tenth the width of an animal cell, and a virus is about a twentieth the width of the bacterium.</p>
+        </div>
+        <div class="card">
+          <div class="parts-head"><h3>A Texas-sized analogy</h3></div>
+          <p style="font-size:15px">Scale the animal cell up to AT&amp;T Stadium, roughly 275 meters across. At that scale the bacterium is about 27 meters, the length of two school buses parked nose to tail somewhere on the field. The virus? About 1.4 meters. A middle schooler standing next to those buses, easy to miss from the stands.</p>
+        </div>
+        <div class="card">
+          <div class="parts-head"><h3>Units cheat sheet</h3></div>
+          <p style="font-size:15px;font-family:'Space Mono',monospace">1 mm = 1,000 µm<br>1 µm = 1,000 nm<br><br>Animal cell ≈ 20 µm<br>Bacterium ≈ 2 µm<br>Virus ≈ 100 nm (0.1 µm)</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <footer>
+    <span>Built as a study companion. The best model is the one you make yourself, after this one makes sense.</span>
+    <span class="mono">CELL EXPLORER · v1.0</span>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ------------------------------------------------------------------ */
+/* Palette (hex ints for three.js)                                     */
+const C = {
+  cyan:0x38E1D4, magenta:0xFF5FA2, amber:0xFFB454, green:0x7BE07B,
+  violet:0xA78BFA, blue:0x5EA8FF, deepviolet:0x6D28D9, teal:0x2DD4BF,
+  orange:0xFF8A3D, gold:0xF5C34B, ice:0x9BD1FF, red:0xF87171, slate:0xB7C4DA
+};
+const hex = n => '#' + n.toString(16).padStart(6,'0');
+
+/* ------------------------------------------------------------------ */
+/* Specimen data                                                       */
+const SPECIMENS = {
+  animal: {
+    num:'01', name:'Animal Cell', sizeLine:'Eukaryote · ~20 µm across',
+    scale:{label:'5 µm', px:90},
+    introTitle:'The eukaryotic cell',
+    intro:'Eukaryotic cells are the complex cells that build animals, plants, fungi and protists. Their defining feature is a true nucleus plus membrane-bound organelles, each handling a specialized job like departments in a factory. A typical animal cell runs about 10 to 30 micrometers across. This one is drawn as a cutaway-style translucent specimen so you can see the machinery inside.',
+    parts:[
+      {id:'nucleus', name:'Nucleus', color:C.violet, req:true,
+       desc:'The control center. The nucleus stores the cell\u2019s DNA and issues instructions, copied as mRNA, that tell the rest of the cell which proteins to build and when. Almost everything else in the cell is downstream of decisions made here.'},
+      {id:'nucleolus', name:'Nucleolus', color:C.deepviolet, req:true,
+       desc:'A dense region inside the nucleus. The nucleolus builds ribosomal RNA and assembles the subunits of ribosomes, which are then shipped out through the nuclear pores to the cytoplasm. More ribosomes needed? The nucleolus gets busier and visibly bigger.'},
+      {id:'envelope', name:'Nuclear Envelope', color:C.blue, req:true,
+       desc:'The double membrane wrapped around the nucleus. It is punched through with nuclear pores that act as security checkpoints, controlling exactly what passes between the nucleus and the cytoplasm, mRNA out, building materials in.'},
+      {id:'cytoplasm', name:'Cytoplasm', color:C.ice, req:true,
+       desc:'The jelly-like fluid (cytosol plus everything suspended in it) that fills the cell. It holds the organelles in place and hosts thousands of chemical reactions at once. Tip: click an empty spot inside the cell to select it in 3D.'},
+      {id:'mito', name:'Mitochondria', color:C.orange, req:true,
+       desc:'The powerhouse, and for once the nickname is deserved. Mitochondria run cellular respiration, converting glucose and oxygen into ATP, the energy currency every other organelle spends. Cells with big energy bills, like muscle, pack in thousands of them.'},
+      {id:'golgi', name:'Golgi Apparatus', color:C.gold, req:true,
+       desc:'The shipping department. The Golgi receives proteins from the endoplasmic reticulum, then modifies, sorts and packages them into vesicles addressed for delivery, some to other organelles, some out of the cell entirely.'},
+      {id:'rer', name:'Rough Endoplasmic Reticulum', color:C.blue, req:true,
+       desc:'A folded maze of membrane studded with ribosomes, which is what makes it look "rough." Proteins built by those ribosomes are threaded inside, folded and quality-checked here before being handed to the Golgi for shipping.'},
+      {id:'ser', name:'Smooth Endoplasmic Reticulum', color:C.teal, req:true,
+       desc:'The ribosome-free stretch of the ER. The smooth ER builds lipids and steroids, helps detoxify drugs and poisons (liver cells have loads of it), and stores the calcium ions that muscle cells use to trigger contraction.'},
+      {id:'ribo', name:'Ribosomes', color:C.slate, req:true,
+       desc:'Tiny protein factories, and the busiest machines in the cell. Ribosomes read mRNA instructions and chain amino acids together into proteins. Some float free in the cytoplasm; others dock on the rough ER to make proteins bound for membranes or export.'},
+      {id:'lyso', name:'Lysosome', color:C.green, req:true,
+       desc:'The recycling and demolition crew. Lysosomes are sacs of digestive enzymes that break down waste, worn-out organelles and invading bacteria into reusable parts. The membrane keeps those enzymes safely contained so the cell doesn\u2019t digest itself.'},
+      {id:'vacuole', name:'Vacuole', color:C.ice, req:true,
+       desc:'A storage bubble for water, nutrients and waste. In animal cells vacuoles are small and scattered, like this one. Plant cells do it differently: one giant central vacuole that can take up most of the cell and keeps the plant firm.'},
+      {id:'membrane', name:'Cell Membrane', color:C.cyan, req:false,
+       desc:'Bonus part (not on your required list, but worth knowing). A phospholipid bilayer that separates the cell from the outside world and controls everything that enters or leaves, from nutrients coming in to signals going out.'}
+    ]
+  },
+  bacterium: {
+    num:'02', name:'Bacterium', sizeLine:'Prokaryote · ~2 µm long',
+    scale:{label:'1 µm', px:110},
+    introTitle:'The prokaryotic cell',
+    intro:'Prokaryotes, the bacteria and archaea, are Earth\u2019s oldest and simplest cells. There is no nucleus and there are no membrane-bound organelles: everything shares one open compartment. At roughly 1 to 5 micrometers, a bacterium is about a tenth the width of an animal cell. Simple does not mean unsuccessful; by sheer numbers, prokaryotes dominate the planet.',
+    parts:[
+      {id:'cytoplasm', name:'Cytoplasm', color:C.ice, req:true,
+       desc:'The gel-like interior where everything happens. With no organelles to compartmentalize the work, the cytoplasm hosts nearly all of the cell\u2019s chemistry directly, metabolism, protein building, DNA copying, all in one shared space. Click an empty spot inside the cell to select it.'},
+      {id:'membrane', name:'Plasma Membrane', color:C.cyan, req:true,
+       desc:'The gatekeeper. This phospholipid bilayer controls what enters and exits the cell. In prokaryotes it moonlights, too: jobs that eukaryotes assign to organelles, like parts of energy production, happen right on this membrane.'},
+      {id:'nucleoid', name:'Genetic Material: Nucleoid', color:C.magenta, req:true,
+       desc:'No nucleus here. The bacterium\u2019s genetic material is a single circular chromosome of DNA, bunched and supercoiled into an irregular tangle called the nucleoid that floats in the cytoplasm with no membrane around it. That is the defining difference from a eukaryote.'},
+      {id:'ribo', name:'Ribosomes', color:C.slate, req:true,
+       desc:'Protein factories, same job as in your cells but slightly smaller (biologists call them 70S rather than 80S). That size difference is a big deal in medicine: several antibiotics work by jamming bacterial ribosomes while leaving yours alone.'},
+      {id:'wall', name:'Cell Wall', color:C.green, req:false,
+       desc:'Bonus part. A rigid layer outside the membrane that gives the bacterium its shape and keeps it from bursting. It is another favorite antibiotic target; penicillin works by sabotaging cell wall construction.'},
+      {id:'flagellum', name:'Flagellum', color:C.amber, req:false,
+       desc:'Bonus part. A long whip-like tail that spins like a propeller, driven by a rotary motor in the membrane, one of the only true rotating wheels in all of biology. It lets the bacterium swim toward food and away from trouble.'}
+    ]
+  },
+  virus: {
+    num:'03', name:'Virus', sizeLine:'Not a cell · ~100 nm across',
+    scale:{label:'50 nm', px:100},
+    introTitle:'The virus (not a cell!)',
+    intro:'A virus is not a cell at all, and most biologists do not consider it fully alive. It is a packet of genetic instructions inside a protein shell, with no cytoplasm, no ribosomes and no metabolism of its own. It cannot do anything until it hijacks a living cell and forces that cell\u2019s machinery to mass-produce copies of it. At about 20 to 300 nanometers, hundreds of viruses could line up across a single bacterium.',
+    parts:[
+      {id:'capsid', name:'Capsid', color:C.teal, req:true,
+       desc:'The protein shell. The capsid is built from repeating protein subunits called capsomeres, which is why so many viruses have this geometric, 20-sided icosahedral shape: it is the most efficient way to enclose space with identical parts. It protects the genome in transit and helps the virus latch onto a host cell.'},
+      {id:'genome', name:'Genetic Information', color:C.magenta, req:true,
+       desc:'The payload: a strand of DNA or RNA (different viruses use different ones) carrying just enough instructions to hijack a host. Once inside a cell, this genome commandeers the host\u2019s ribosomes and enzymes and turns the cell into a virus copy machine.'},
+      {id:'spikes', name:'Spike Proteins', color:C.amber, req:false,
+       desc:'Bonus part. Surface proteins that work like keys, docking with specific receptor "locks" on a host cell\u2019s membrane. This lock-and-key match is why a given virus infects some species and cell types but not others.'}
+    ]
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Three.js engine                                                     */
+const canvas = document.getElementById('view');
+const scope  = document.getElementById('scope');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+
+const orbit = { theta:0.6, phi:1.15, radius:14, target:new THREE.Vector3(0,0,0) };
+let lastInteract = 0;
+
+function applyCamera(){
+  const sp = orbit;
+  camera.position.set(
+    sp.target.x + sp.radius * Math.sin(sp.phi) * Math.sin(sp.theta),
+    sp.target.y + sp.radius * Math.cos(sp.phi),
+    sp.target.z + sp.radius * Math.sin(sp.phi) * Math.cos(sp.theta)
+  );
+  camera.lookAt(sp.target);
+}
+
+function mat(color, opts={}){
+  return new THREE.MeshPhongMaterial(Object.assign({
+    color, shininess:40, emissive:0x000000, emissiveIntensity:1
+  }, opts));
+}
+
+/* Build helpers ----------------------------------------------------- */
+function sphere(r, color, opts={}, seg=32){
+  return new THREE.Mesh(new THREE.SphereGeometry(r, seg, seg), mat(color, opts));
+}
+function scatter(n, rMax, yMax){
+  const pts=[];
+  for(let i=0;i<n;i++){
+    const v = new THREE.Vector3().setFromSphericalCoords(
+      Math.cbrt(Math.random())*rMax,
+      Math.acos(2*Math.random()-1),
+      Math.random()*Math.PI*2
+    );
+    if(yMax!==undefined) v.y = THREE.MathUtils.clamp(v.y,-yMax,yMax);
+    pts.push(v);
+  }
+  return pts;
+}
+
+/* Each builder returns {scene, partMeshes: Map(partId -> [mesh]),
+   anchors: Map(partId -> Vector3), cytoplasmMesh, radius} */
+
+function buildAnimal(){
+  const scene = new THREE.Scene();
+  addLights(scene);
+  const g = new THREE.Group(); scene.add(g);
+  const partMeshes = new Map(); const anchors = new Map();
+  const add = (id, mesh) => {
+    mesh.userData.part = id; g.add(mesh);
+    if(!partMeshes.has(id)) partMeshes.set(id, []);
+    partMeshes.get(id).push(mesh);
+    return mesh;
+  };
+
+  // membrane + cytoplasm
+  const membrane = add('membrane', sphere(5, C.cyan, {transparent:true, opacity:0.13, depthWrite:false}, 48));
+  const cyto = add('cytoplasm', sphere(4.8, C.ice, {transparent:true, opacity:0.05, depthWrite:false}, 48));
+  anchors.set('membrane', new THREE.Vector3(0,4.6,1.4));
+  anchors.set('cytoplasm', new THREE.Vector3(2.6,2.6,-1.6));
+
+  // nucleus cluster (offset left)
+  const nPos = new THREE.Vector3(-1.1, 0.1, 0);
+  const envelope = add('envelope', sphere(1.85, C.blue, {transparent:true, opacity:0.22, depthWrite:false}));
+  envelope.position.copy(nPos);
+  const nucleus = add('nucleus', sphere(1.62, C.violet, {transparent:true, opacity:0.5, depthWrite:false}));
+  nucleus.position.copy(nPos);
+  const nucleolus = add('nucleolus', sphere(0.52, C.deepviolet, {shininess:70}));
+  nucleolus.position.copy(nPos).add(new THREE.Vector3(0.35,0.25,0.2));
+  anchors.set('envelope', nPos.clone().add(new THREE.Vector3(0,1.95,0)));
+  anchors.set('nucleus',  nPos.clone().add(new THREE.Vector3(-1.1,0.9,0.6)));
+  anchors.set('nucleolus',nucleolus.position.clone());
+
+  // mitochondria
+  const mitoSpots = [[2.4,1.5,0.8,0.4],[1.8,-1.7,-1.5,1.2],[-0.6,-2.6,1.3,2.1],[0.6,2.7,-1.6,-0.7],[3.1,-0.4,1.6,0.9]];
+  mitoSpots.forEach(([x,y,z,rot],i)=>{
+    const m = add('mito', sphere(0.55, C.orange, {shininess:60}));
+    m.scale.set(1.7,0.72,0.72); m.position.set(x,y,z);
+    m.rotation.set(rot, rot*1.4, rot*0.6);
+    if(i===0) anchors.set('mito', new THREE.Vector3(x,y+0.85,z));
+  });
+
+  // golgi: stack of flattened arcs
+  const gPos = new THREE.Vector3(1.7, 0.4, -2.2);
+  for(let i=0;i<5;i++){
+    const disc = add('golgi', sphere(0.95 - i*0.06, C.gold, {shininess:55}));
+    disc.scale.set(1.35, 0.16, 0.8);
+    disc.position.copy(gPos).add(new THREE.Vector3(i*0.06, i*0.33, i*0.05));
+    disc.rotation.z = 0.15;
+  }
+  anchors.set('golgi', gPos.clone().add(new THREE.Vector3(0,1.9,0)));
+
+  // rough ER: partial tori around nucleus with ribosome studs
+  const rerMat = mat(C.blue, {shininess:35});
+  const riboMatER = mat(C.slate, {shininess:20});
+  for(let i=0;i<3;i++){
+    const R = 2.35 + i*0.42;
+    const tor = new THREE.Mesh(new THREE.TorusGeometry(R, 0.13, 10, 60, Math.PI*0.85), rerMat.clone());
+    tor.position.copy(nPos); tor.rotation.set(Math.PI/2, 0, Math.PI*0.55 + i*0.12);
+    tor.rotation.x += (i-1)*0.18;
+    add('rer', tor);
+    // studs
+    for(let s=0;s<12;s++){
+      const a = Math.PI*0.55 + (s/12)*Math.PI*0.85;
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8), riboMatER.clone());
+      const local = new THREE.Vector3(Math.cos(a)*R, Math.sin(a)*R, 0.13);
+      dot.position.copy(local.applyEuler(tor.rotation)).add(nPos);
+      add('rer', dot);
+    }
+  }
+  anchors.set('rer', nPos.clone().add(new THREE.Vector3(2.1,-2.2,0.4)));
+
+  // smooth ER: tubes on the far side
+  const serCurvePts = [[-3.3,1.4,1.0],[-2.6,2.1,0.2],[-3.4,2.3,-0.8],[-2.7,1.5,-1.6],[-3.5,0.8,-1.0],[-2.9,0.6,0.2]]
+    .map(p=>new THREE.Vector3(...p));
+  const serCurve = new THREE.CatmullRomCurve3(serCurvePts);
+  const serTube = new THREE.Mesh(new THREE.TubeGeometry(serCurve, 60, 0.14, 8, false), mat(C.teal,{shininess:45}));
+  add('ser', serTube);
+  const serTube2 = new THREE.Mesh(new THREE.TubeGeometry(
+    new THREE.CatmullRomCurve3(serCurvePts.map(p=>p.clone().add(new THREE.Vector3(0.25,-0.5,0.35)))),
+    60, 0.11, 8, false), mat(C.teal,{shininess:45}));
+  add('ser', serTube2);
+  anchors.set('ser', new THREE.Vector3(-3.2,2.9,-0.4));
+
+  // free ribosomes
+  const riboGeo = new THREE.SphereGeometry(0.075, 8, 8);
+  scatter(42, 4.3, 4).forEach((p,i)=>{
+    if(p.distanceTo(nPos) < 2.2) p.multiplyScalar(1.6);
+    if(p.length()>4.4) p.setLength(4.2);
+    const dot = new THREE.Mesh(riboGeo, mat(C.slate,{shininess:15}));
+    dot.position.copy(p); add('ribo', dot);
+    if(i===0) anchors.set('ribo', p.clone().add(new THREE.Vector3(0,0.5,0)));
+  });
+
+  // lysosomes
+  [[0.4,-1.4,2.6],[2.9,1.9,-0.9]].forEach(([x,y,z],i)=>{
+    const l = add('lyso', sphere(0.36, C.green, {shininess:65}));
+    l.position.set(x,y,z);
+    if(i===0) anchors.set('lyso', new THREE.Vector3(x,y+0.65,z));
+  });
+
+  // vacuole
+  const v = add('vacuole', sphere(0.75, C.ice, {transparent:true, opacity:0.45, shininess:80}));
+  v.position.set(-1.3,-2.2,-1.9);
+  anchors.set('vacuole', v.position.clone().add(new THREE.Vector3(0,1.05,0)));
+
+  return {scene, group:g, partMeshes, anchors, cytoId:'cytoplasm', outerIds:['membrane'],
+          camRadius:14, minR:8, maxR:24, cytoMesh:cyto, outerMeshes:[membrane]};
+}
+
+function buildBacterium(){
+  const scene = new THREE.Scene();
+  addLights(scene);
+  const g = new THREE.Group(); scene.add(g);
+  const partMeshes = new Map(); const anchors = new Map();
+  const add = (id, mesh) => {
+    mesh.userData.part = id; g.add(mesh);
+    if(!partMeshes.has(id)) partMeshes.set(id, []);
+    partMeshes.get(id).push(mesh); return mesh;
+  };
+
+  // rod shape: stretched spheres. wall (outer, bonus) + membrane + cytoplasm
+  const wall = add('wall', sphere(2.35, C.green, {transparent:true, opacity:0.12, depthWrite:false}, 48));
+  wall.scale.set(2.15,1,1);
+  const membrane = add('membrane', sphere(2.2, C.cyan, {transparent:true, opacity:0.16, depthWrite:false}, 48));
+  membrane.scale.set(2.12,0.96,0.96);
+  const cyto = add('cytoplasm', sphere(2.05, C.ice, {transparent:true, opacity:0.06, depthWrite:false}, 48));
+  cyto.scale.set(2.1,0.94,0.94);
+  anchors.set('wall', new THREE.Vector3(-2.6,2.35,0));
+  anchors.set('membrane', new THREE.Vector3(1.6,2.15,0.6));
+  anchors.set('cytoplasm', new THREE.Vector3(3.0,-1.2,0.4));
+
+  // nucleoid: tangled torus knot
+  const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.95, 0.16, 120, 10, 2, 5), mat(C.magenta,{shininess:60}));
+  knot.scale.set(1.5,0.85,0.85); knot.rotation.set(0.4,0.6,0.2);
+  add('nucleoid', knot);
+  anchors.set('nucleoid', new THREE.Vector3(0,1.5,0));
+
+  // ribosomes
+  const riboGeo = new THREE.SphereGeometry(0.08, 8, 8);
+  scatter(46, 1.0).forEach((p,i)=>{
+    p.x *= 3.6; p.y *= 1.55; p.z *= 1.55;
+    const dot = new THREE.Mesh(riboGeo, mat(C.slate,{shininess:15}));
+    dot.position.copy(p); add('ribo', dot);
+    if(i===0) anchors.set('ribo', p.clone().add(new THREE.Vector3(0,0.45,0)));
+  });
+
+  // flagellum
+  const fPts=[]; for(let i=0;i<=40;i++){
+    const t=i/40;
+    fPts.push(new THREE.Vector3(4.7 + t*4.6, Math.sin(t*Math.PI*4)*0.55, Math.cos(t*Math.PI*4)*0.55));
+  }
+  const flag = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(fPts), 80, 0.07, 8, false),
+                              mat(C.amber,{shininess:50}));
+  add('flagellum', flag);
+  anchors.set('flagellum', new THREE.Vector3(7.2,1.1,0));
+
+  return {scene, group:g, partMeshes, anchors, cytoId:'cytoplasm', outerIds:['wall','membrane'],
+          camRadius:15, minR:9, maxR:26, cytoMesh:cyto, outerMeshes:[wall,membrane]};
+}
+
+function buildVirus(){
+  const scene = new THREE.Scene();
+  addLights(scene);
+  const g = new THREE.Group(); scene.add(g);
+  const partMeshes = new Map(); const anchors = new Map();
+  const add = (id, mesh) => {
+    mesh.userData.part = id; g.add(mesh);
+    if(!partMeshes.has(id)) partMeshes.set(id, []);
+    partMeshes.get(id).push(mesh); return mesh;
+  };
+
+  const capsidGeo = new THREE.IcosahedronGeometry(2.1, 0);
+  const capsid = add('capsid', new THREE.Mesh(capsidGeo,
+    mat(C.teal, {transparent:true, opacity:0.5, flatShading:true, shininess:80})));
+  const capsidEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(capsidGeo),
+    new THREE.LineBasicMaterial({color:C.cyan, transparent:true, opacity:0.85}));
+  g.add(capsidEdges);
+  anchors.set('capsid', new THREE.Vector3(0,2.5,0.4));
+
+  const genome = add('genome', new THREE.Mesh(
+    new THREE.TorusKnotGeometry(0.85, 0.14, 140, 10, 3, 7), mat(C.magenta,{shininess:60})));
+  genome.rotation.set(0.5,0.3,0.1);
+  anchors.set('genome', new THREE.Vector3(0.9,-0.9,0.8));
+
+  // spikes on icosahedron vertices
+  const verts = capsidGeo.attributes.position;
+  const seen = new Set();
+  for(let i=0;i<verts.count;i++){
+    const v = new THREE.Vector3().fromBufferAttribute(verts, i);
+    const key = v.toArray().map(n=>n.toFixed(2)).join(',');
+    if(seen.has(key)) continue; seen.add(key);
+    const dir = v.clone().normalize();
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.55,8), mat(C.amber,{shininess:60}));
+    stem.position.copy(dir.clone().multiplyScalar(2.35));
+    stem.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+    add('spikes', stem);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.11,10,10), mat(C.amber,{shininess:70}));
+    tip.position.copy(dir.clone().multiplyScalar(2.66));
+    add('spikes', tip);
+  }
+  anchors.set('spikes', new THREE.Vector3(-1.9,-2.2,0.6));
+
+  return {scene, group:g, partMeshes, anchors, cytoId:null, outerIds:['capsid'],
+          camRadius:9.5, minR:6, maxR:18, cytoMesh:null, outerMeshes:[capsid]};
+}
+
+function addLights(scene){
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(6,9,7); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x88BBFF, 0.4); rim.position.set(-7,-4,-6); scene.add(rim);
+  const fill = new THREE.PointLight(0xFFD9A0, 0.35, 60); fill.position.set(0,-6,8); scene.add(fill);
+}
+
+const worlds = { animal: buildAnimal(), bacterium: buildBacterium(), virus: buildVirus() };
+
+/* ------------------------------------------------------------------ */
+/* App state + UI                                                      */
+let activeTab = 'animal';
+let selection = null;
+let labelsOn = false;
+const quiz = { on:false, order:[], idx:0, score:0, answered:false };
+
+const $ = id => document.getElementById(id);
+const labelsHost = $('labels');
+const tip = $('tip');
+
+function partById(spec, id){ return SPECIMENS[spec].parts.find(p=>p.id===id); }
+
+function setEmissive(spec, id, on){
+  const w = worlds[spec];
+  (w.partMeshes.get(id)||[]).forEach(m=>{
+    if(!m.material || !m.material.emissive) return;
+    m.material.emissive.setHex(on ? 0xFFB454 : 0x000000);
+    m.material.emissiveIntensity = on ? 0.55 : 1;
+  });
+}
+
+function select(id, opts={}){
+  if(selection) setEmissive(activeTab, selection, false);
+  selection = id;
+  if(id) setEmissive(activeTab, id, true);
+  // sidebar
+  document.querySelectorAll('.part').forEach(el=>{
+    el.classList.toggle('sel', el.dataset.part===id);
+  });
+  // info card
+  if(id){
+    const p = partById(activeTab, id);
+    $('info-placeholder').style.display='none';
+    $('info-body').style.display='block';
+    $('info-chip').style.color = hex(p.color);
+    $('info-chip').style.background = hex(p.color);
+    $('info-name').textContent = p.name + (p.req ? '' : '  (bonus)');
+    $('info-desc').textContent = p.desc;
+    if(!opts.quiet && window.innerWidth<=900) $('infocard').scrollIntoView({behavior:REDUCED?'auto':'smooth', block:'nearest'});
+  } else {
+    $('info-placeholder').style.display='block';
+    $('info-body').style.display='none';
+  }
+}
+
+function renderSidebar(){
+  const spec = SPECIMENS[activeTab];
+  $('plate-num').textContent = spec.num;
+  $('plate-name').textContent = spec.name;
+  $('plate-size').textContent = spec.sizeLine;
+  $('scale-label').textContent = spec.scale.label;
+  $('scale-bar').style.width = spec.scale.px + 'px';
+  $('intro-title').textContent = spec.introTitle;
+  $('intro-text').textContent = spec.intro;
+  const req = spec.parts.filter(p=>p.req).length;
+  $('parts-count').textContent = req + ' required · ' + (spec.parts.length-req) + ' bonus';
+  const host = $('parts'); host.innerHTML='';
+  spec.parts.forEach(p=>{
+    const b = document.createElement('button');
+    b.className='part'; b.dataset.part=p.id;
+    b.innerHTML = '<span class="swatch" style="color:'+hex(p.color)+';background:'+hex(p.color)+'"></span>'
+      + '<span>'+p.name+'</span>'
+      + (p.req ? '' : '<span class="tag">bonus</span>');
+    b.addEventListener('click', ()=>{ if(!quiz.on) select(p.id); });
+    host.appendChild(b);
+  });
+  host.classList.toggle('locked', quiz.on);
+}
+
+function rebuildLabels(){
+  labelsHost.innerHTML='';
+  if(!labelsOn) return;
+  const spec = SPECIMENS[activeTab];
+  spec.parts.forEach(p=>{
+    const d = document.createElement('div');
+    d.className = 'lbl' + (p.req?'':' bonus');
+    d.dataset.part = p.id;
+    d.textContent = p.name;
+    labelsHost.appendChild(d);
+  });
+}
+
+function updateLabels(){
+  if(!labelsOn || activeTab==='compare') return;
+  const w = worlds[activeTab];
+  const rect = canvas.getBoundingClientRect();
+  labelsHost.querySelectorAll('.lbl').forEach(d=>{
+    const a = w.anchors.get(d.dataset.part);
+    if(!a){ d.style.display='none'; return; }
+    const v = a.clone().applyMatrix4(w.group.matrixWorld).project(camera);
+    if(v.z > 1){ d.style.display='none'; return; }
+    d.style.display='block';
+    d.style.left = ((v.x*0.5+0.5)*rect.width) + 'px';
+    d.style.top  = ((-v.y*0.5+0.5)*rect.height) + 'px';
+  });
+}
+
+/* ---------- raycast selection with drill-down ---------- */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+function partsUnderPointer(ev){
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = ((ev.clientX-rect.left)/rect.width)*2-1;
+  mouse.y = -((ev.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(mouse, camera);
+  const w = worlds[activeTab];
+  const targets=[];
+  w.partMeshes.forEach(list=>list.forEach(m=>targets.push(m)));
+  const hits = raycaster.intersectObjects(targets, false);
+  const ordered=[];
+  hits.forEach(h=>{
+    const id = h.object.userData.part;
+    if(id && !ordered.includes(id)) ordered.push(id);
+  });
+  return ordered;
+}
+
+function defaultPick(ordered){
+  const w = worlds[activeTab];
+  const shell = new Set([...(w.outerIds||[]), w.cytoId].filter(Boolean));
+  const organelle = ordered.find(id=>!shell.has(id));
+  if(organelle) return organelle;
+  if(w.cytoId && ordered.includes(w.cytoId)) return w.cytoId;
+  return ordered[0];
+}
+
+function handlePick(ev){
+  const ordered = partsUnderPointer(ev);
+  if(quiz.on){ quizAnswer(ordered); return; }
+  if(!ordered.length){ select(null); return; }
+  let pick = defaultPick(ordered);
+  if(selection && ordered.includes(selection)){
+    pick = ordered[(ordered.indexOf(selection)+1) % ordered.length]; // drill down / cycle
+  }
+  select(pick);
+}
+
+canvas.addEventListener('mousemove', ev=>{
+  if(drag.active) return;
+  const ordered = partsUnderPointer(ev);
+  if(ordered.length && !quiz.on){
+    const p = partById(activeTab, defaultPick(ordered));
+    tip.style.display='block';
+    const rect = scope.getBoundingClientRect();
+    tip.style.left=(ev.clientX-rect.left)+'px';
+    tip.style.top=(ev.clientY-rect.top)+'px';
+    tip.textContent = p.name;
+    canvas.style.cursor='pointer';
+  } else {
+    tip.style.display='none';
+    canvas.style.cursor= drag.active?'grabbing':'grab';
+  }
+});
+canvas.addEventListener('mouseleave', ()=> tip.style.display='none');
+
+/* ---------- orbit controls (custom, touch friendly) ---------- */
+const drag = {active:false, moved:false, x:0, y:0, pinch:0};
+canvas.addEventListener('pointerdown', ev=>{
+  drag.active=true; drag.moved=false; drag.x=ev.clientX; drag.y=ev.clientY;
+  canvas.classList.add('dragging'); canvas.setPointerCapture(ev.pointerId);
+  lastInteract = performance.now();
+});
+canvas.addEventListener('pointermove', ev=>{
+  if(!drag.active) return;
+  const dx=ev.clientX-drag.x, dy=ev.clientY-drag.y;
+  if(Math.abs(dx)+Math.abs(dy)>3) drag.moved=true;
+  orbit.theta -= dx*0.006;
+  orbit.phi = THREE.MathUtils.clamp(orbit.phi - dy*0.006, 0.15, Math.PI-0.15);
+  drag.x=ev.clientX; drag.y=ev.clientY;
+  lastInteract = performance.now();
+});
+canvas.addEventListener('pointerup', ev=>{
+  canvas.classList.remove('dragging');
+  if(drag.active && !drag.moved) handlePick(ev);
+  drag.active=false;
+});
+canvas.addEventListener('wheel', ev=>{
+  ev.preventDefault();
+  const w = worlds[activeTab];
+  orbit.radius = THREE.MathUtils.clamp(orbit.radius + ev.deltaY*0.012, w.minR, w.maxR);
+  lastInteract = performance.now();
+},{passive:false});
+
+/* pinch zoom */
+let touches = new Map();
+canvas.addEventListener('touchstart', ev=>{
+  [...ev.touches].forEach(t=>touches.set(t.identifier,{x:t.clientX,y:t.clientY}));
+  if(ev.touches.length===2){
+    const [a,b]=ev.touches;
+    drag.pinch = Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+  }
+},{passive:true});
+canvas.addEventListener('touchmove', ev=>{
+  if(ev.touches.length===2){
+    const [a,b]=ev.touches;
+    const d = Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+    const w = worlds[activeTab];
+    orbit.radius = THREE.MathUtils.clamp(orbit.radius + (drag.pinch-d)*0.03, w.minR, w.maxR);
+    drag.pinch = d; drag.active=false;
+    lastInteract = performance.now();
+  }
+},{passive:true});
+canvas.addEventListener('touchend', ()=>touches.clear(), {passive:true});
+
+/* ---------- quiz ---------- */
+function startQuiz(){
+  const req = SPECIMENS[activeTab].parts.filter(p=>p.req).map(p=>p.id);
+  quiz.order = req.sort(()=>Math.random()-0.5);
+  quiz.idx=0; quiz.score=0; quiz.on=true; quiz.answered=false;
+  select(null);
+  labelsOn=false; $('btn-labels').setAttribute('aria-pressed','false'); rebuildLabels();
+  $('btn-quiz').setAttribute('aria-pressed','true');
+  $('quizbar').style.display='block';
+  $('parts').classList.add('locked');
+  nextQuizQ(false);
+}
+function stopQuiz(final){
+  quiz.on=false;
+  $('btn-quiz').setAttribute('aria-pressed','false');
+  $('parts').classList.remove('locked');
+  if(!final) $('quizbar').style.display='none';
+}
+function nextQuizQ(advance){
+  if(advance) quiz.idx++;
+  if(quiz.idx >= quiz.order.length){
+    $('quiz-q').textContent = 'Done! You found ' + quiz.score + ' of ' + quiz.order.length + ' on the first try.';
+    $('quiz-s').textContent = quiz.score === quiz.order.length ? 'Perfect. Now go build the real thing.' : 'Run it again until it\u2019s automatic.';
+    $('quiz-fb').textContent='';
+    stopQuiz(true);
+    setTimeout(()=>{ if(!quiz.on) $('quizbar').style.display='none'; }, 4200);
+    return;
+  }
+  quiz.answered=false;
+  const p = partById(activeTab, quiz.order[quiz.idx]);
+  $('quiz-q').textContent = 'Find the ' + p.name.toLowerCase();
+  $('quiz-s').textContent = 'Question ' + (quiz.idx+1) + ' of ' + quiz.order.length + ' · Score ' + quiz.score;
+  $('quiz-fb').textContent=''; $('quiz-fb').className='fb';
+}
+function quizAnswer(orderedIds){
+  if(quiz.answered || !orderedIds.length) return;
+  const want = quiz.order[quiz.idx];
+  const fb = $('quiz-fb');
+  const w = worlds[activeTab];
+  const shell = new Set([...(w.outerIds||[]), w.cytoId].filter(Boolean));
+  const correct = shell.has(want) ? orderedIds.includes(want) : defaultPick(orderedIds)===want;
+  if(correct){
+    quiz.answered=true;
+    quiz.score++;
+    fb.textContent='Correct!'; fb.className='fb good';
+    setEmissive(activeTab, want, true);
+    setTimeout(()=>{ setEmissive(activeTab, want, false); nextQuizQ(true); }, 800);
+  } else {
+    fb.textContent='Not quite. That\u2019s the ' + partById(activeTab, defaultPick(orderedIds)).name.toLowerCase() + '. Keep looking.';
+    fb.className='fb bad';
+  }
+}
+$('btn-quiz').addEventListener('click', ()=>{
+  if(quiz.on){ stopQuiz(false); } else { startQuiz(); }
+});
+$('btn-labels').addEventListener('click', ()=>{
+  if(quiz.on) return;
+  labelsOn = !labelsOn;
+  $('btn-labels').setAttribute('aria-pressed', String(labelsOn));
+  rebuildLabels();
+});
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
+    t.setAttribute('aria-selected','true');
+    switchTab(t.dataset.tab);
+  });
+});
+function switchTab(tab){
+  if(quiz.on) stopQuiz(false);
+  $('quizbar').style.display='none';
+  selection && setEmissive(activeTab, selection, false);
+  selection = null;
+  activeTab = tab;
+  const is3d = tab!=='compare';
+  $('stage3d').style.display = is3d ? 'grid' : 'none';
+  $('stage-compare').classList.toggle('active', !is3d);
+  if(is3d){
+    const w = worlds[tab];
+    orbit.radius = w.camRadius; orbit.theta=0.6; orbit.phi=1.15;
+    renderSidebar(); rebuildLabels(); select(null,{quiet:true}); resize();
+  }
+}
+
+/* ---------- size comparison ---------- */
+/* true sizes in nm: cell 20000, bacterium 2000, virus 100 */
+const CMP = [
+  {label:'25 µm field', umPerPx:25/520, bar:'5 µm',
+   note:'The whole animal cell fits in view. The bacterium is that small rod beside it. The virus is technically drawn here too. It is the pink fleck about two pixels wide. Squint.'},
+  {label:'2.5 µm field', umPerPx:2.5/520, bar:'500 nm',
+   note:'Zoomed in 10\u00d7. Now the bacterium fills the view and the virus is clearly visible. The animal cell? Its edge would be somewhere out past your screen, about ten screens to the left.'},
+  {label:'250 nm field', umPerPx:0.25/520, bar:'50 nm',
+   note:'Zoomed in 100\u00d7 from the start. The virus finally looks substantial. At this scale even the bacterium has outgrown your screen, and the animal cell is the size of a building.'}
+];
+const CMP_ITEMS = [
+  {name:'Animal cell · 20 µm', um:20, color:'rgba(94,168,255,.28)', ring:'#5EA8FF'},
+  {name:'Bacterium · 2 µm', um:2, color:'rgba(123,224,123,.3)', ring:'#7BE07B'},
+  {name:'Virus · 100 nm', um:0.1, color:'rgba(255,95,162,.4)', ring:'#FF5FA2'}
+];
+function renderCompare(stop){
+  const cfg = CMP[stop];
+  const stage = $('cmp-stage'); stage.innerHTML='';
+  const offs = [[-0.28,0],[0.18,-0.08],[0.36,0.16]];
+  CMP_ITEMS.forEach((it,i)=>{
+    const px = it.um / cfg.umPerPx;
+    const d = document.createElement('div');
+    d.className='blob';
+    const size = Math.max(px, 2);
+    d.style.width=size+'px'; d.style.height=size+'px';
+    d.style.background=it.color;
+    d.style.border='1.5px solid '+it.ring;
+    d.style.boxShadow='0 0 18px '+it.ring+'44';
+    d.style.left='calc(50% + '+(offs[i][0]*420)+'px - '+(size/2)+'px)';
+    d.style.top='calc(50% + '+(offs[i][1]*300)+'px - '+(size/2)+'px)';
+    if(px > 3000){ d.style.opacity='0'; }  // way off-scale: fade out
+    const bl=document.createElement('span'); bl.className='bl';
+    bl.style.color=it.ring; bl.textContent=it.name;
+    if(px>=2 && px<=1200) d.appendChild(bl);
+    stage.appendChild(d);
+  });
+  $('cmp-scale-label').textContent = cfg.bar;
+  $('cmp-scale-bar').style.width='104px';
+  $('cmp-note').textContent = cfg.note;
+  document.querySelectorAll('.zoomstop').forEach(b=>{
+    b.setAttribute('aria-pressed', String(+b.dataset.stop===stop));
+  });
+}
+document.querySelectorAll('.zoomstop').forEach(b=>{
+  b.addEventListener('click', ()=>renderCompare(+b.dataset.stop));
+});
+
+/* ---------- render loop ---------- */
+function resize(){
+  const w = scope.clientWidth, h = scope.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+let pulse = 0;
+function animate(t){
+  requestAnimationFrame(animate);
+  if(activeTab==='compare') return;
+  const w = worlds[activeTab];
+  if(!REDUCED && performance.now()-lastInteract > 3000){
+    orbit.theta += 0.0018; // idle auto-rotate
+  }
+  if(!REDUCED && selection){
+    pulse = 0.4 + 0.25*Math.sin(t*0.004);
+    (w.partMeshes.get(selection)||[]).forEach(m=>{
+      if(m.material && m.material.emissive) m.material.emissiveIntensity = pulse;
+    });
+  }
+  applyCamera();
+  renderer.render(w.scene, camera);
+  updateLabels();
+}
+
+/* ---------- boot ---------- */
+renderSidebar();
+renderCompare(0);
+resize();
+applyCamera();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
